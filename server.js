@@ -3,14 +3,12 @@ const fs = require('fs');
 const path = require('path');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// laws_database.json मात्र प्रयोग गरिन्छ - nepal-laws-catalog.js हटाइएको छ
+// laws_database.json र nepal-laws-catalog.js दुवै प्रयोग गरिन्छ
 
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
-
-// Static files serve गर्ने
 app.use(express.static(__dirname));
 
 // CORS Middleware थप गरिएको छ ताकि फ्रन्टइन्डले बिना रोकटोक कल गर्न सकोस्
@@ -31,7 +29,9 @@ const genAI = new GoogleGenerativeAI(API_KEY);
 
 // PDF को साटो सिधै नयाँ JSON फाइलको पाथ राख्ने
 const JSON_DB_PATH = path.join(__dirname, 'laws_database.json');
+const NEPAL_LAWS_CATALOG_PATH = path.join(__dirname, 'nepal-laws-catalog.js');
 let lawsDatabase = [];
+let nepalLawsCatalog = [];
 
 function normalizeSearchText(text) {
     return String(text || '')
@@ -234,8 +234,8 @@ function finalizeAnalysis(complaint, analysisObj) {
         }
     }
 
-    analysisObj.sources = ['laws_database.json'];
-    if (!analysisObj.source) analysisObj.source = 'laws_database_only';
+    analysisObj.sources = ['laws_database.json', 'nepal-laws-catalog.js'];
+    if (!analysisObj.source) analysisObj.source = 'combined_sources';
     return analysisObj;
 }
 
@@ -261,9 +261,35 @@ function buildRelevantLawContext(complaint, limit = 6) {
     }).join('\n');
 }
 
+function buildCatalogLawContext(complaint, limit = 10) {
+    const hay = normalizeSearchText(complaint);
+    const keywords = hay.split(/\s+/).filter((k) => k.length >= 2);
+    
+    const scored = nepalLawsCatalog.map(lawName => {
+        const name = normalizeSearchText(lawName);
+        let score = 0;
+        keywords.forEach((k) => {
+            if (name.includes(k)) score += 3;
+        });
+        if (hay.includes(name.slice(0, Math.min(name.length, 12)))) score += 8;
+        return { lawName, score };
+    }).filter(item => item.score > 0);
+
+    const topLaws = scored.sort((a, b) => b.score - a.score).slice(0, limit);
+    return topLaws.map(item => item.lawName).join('\n');
+}
+
 function buildLocalOnlyAnalysis(complaint) {
     const dbSuggested = buildSuggestedLawsFromDatabase(complaint, 5);
-    const suggestedLaws = mergeAllSuggestedLaws([], dbSuggested, 6);
+    const catalogContext = buildCatalogLawContext(complaint, 10);
+    // catalog context बाट additional suggestions थप्ने
+    const catalogLaws = catalogContext.split('\n').filter(name => name.trim()).map(name => ({
+        name: name.trim(),
+        section: 'सम्बन्धित ऐन',
+        description: 'nepal-laws-catalog.js बाट पहिचान गरिएको सम्बन्धित ऐन',
+        score: 2
+    }));
+    const suggestedLaws = mergeAllSuggestedLaws(catalogLaws, dbSuggested, 6);
     const inferred = inferCategoryFromComplaint(complaint, suggestedLaws);
     const built = buildCommitteeDecisionFromSources(complaint, inferred, suggestedLaws);
     return finalizeAnalysis(complaint, {
@@ -273,19 +299,37 @@ function buildLocalOnlyAnalysis(complaint) {
         committeeDecision: built.committeeDecision,
         investigationProcedure: built.investigationProcedure,
         suggestedLaws,
-        source: 'local_database_only'
+        source: 'combined_sources'
     });
 }
 
-// सर्भर सुरु हुँदा १ सेकेन्डमै JSON लोड गर्ने फंक्सन
+// सर्भर सुरु हुँदा १ सेकेन्डमै JSON र nepal-laws-catalog.js लोड गर्ने फंक्सन
 function loadJSONDatabase() {
     console.log("⏳ JSON डेटाबेस लोड हुँदैछ...");
     if (fs.existsSync(JSON_DB_PATH)) {
         const rawData = fs.readFileSync(JSON_DB_PATH, 'utf8');
         lawsDatabase = JSON.parse(rawData);
-        console.log(`⚡ सफलतापूर्वक ${lawsDatabase.length} वटा कानूनहरू JSON बाट लोड भए। API तयार छ!`);
+        console.log(`⚡ सफलतापूर्वक ${lawsDatabase.length} वटा कानूनहरू JSON बाट लोड भए।`);
     } else {
         console.error("❌ त्रुटि: 'laws_database.json' फाइल फेला परेन। पहिले convert.js चलाउनुहोस्।");
+    }
+
+    console.log("⏳ Nepal Laws Catalog लोड हुँदैछ...");
+    if (fs.existsSync(NEPAL_LAWS_CATALOG_PATH)) {
+        const catalogContent = fs.readFileSync(NEPAL_LAWS_CATALOG_PATH, 'utf8');
+        // NEPAL_ACT_NAMES array निकाल्ने
+        const match = catalogContent.match(/const NEPAL_ACT_NAMES = \[([\s\S]*?)\];/);
+        if (match) {
+            const arrayContent = match[1];
+            // Array elements निकाल्ने
+            const lawNames = arrayContent.match(/"([^"]+)"/g);
+            if (lawNames) {
+                nepalLawsCatalog = lawNames.map(name => name.replace(/"/g, ''));
+                console.log(`⚡ सफलतापूर्वक ${nepalLawsCatalog.length} वटा ऐनहरू nepal-laws-catalog.js बाट लोड भए। API तयार छ!`);
+            }
+        }
+    } else {
+        console.error("❌ त्रुटि: 'nepal-laws-catalog.js' फाइल फेला परेन।");
     }
 }
 
@@ -293,6 +337,41 @@ function loadJSONDatabase() {
 app.get('/api/laws', (req, res) => {
     const lawList = lawsDatabase.map(law => law.lawName);
     res.json({ totalLaws: lawList.length, laws: lawList });
+});
+
+// २. पूरै laws_database.json फिर्ता गर्ने API
+app.get('/api/laws-database', (req, res) => {
+    res.json({
+        totalLaws: lawsDatabase.length,
+        database: lawsDatabase
+    });
+});
+
+// ३. विशिष्ट कानून ID बाट कानून खोज्ने API
+app.get('/api/laws/:id', (req, res) => {
+    const lawId = req.params.id;
+    const law = lawsDatabase.find(l => l.id === lawId || l.lawName === lawId);
+    
+    if (!law) {
+        return res.status(404).json({ error: "कानून फेला परेन" });
+    }
+    
+    res.json(law);
+});
+
+// ४. कानून नामबाट खोज्ने API
+app.get('/api/laws/search/:query', (req, res) => {
+    const query = normalizeSearchText(req.params.query);
+    const results = lawsDatabase.filter(law => {
+        const lawName = normalizeSearchText(law.lawName || '');
+        return lawName.includes(query);
+    });
+    
+    res.json({
+        query: req.params.query,
+        totalResults: results.length,
+        results: results
+    });
 });
 
 // २. उजुरी विश्लेषण गर्ने मुख्य AI Endpoint (संरचित JSON सहित)
@@ -311,8 +390,9 @@ app.post('/api/analyze-complaint', async (req, res) => {
     try {
         console.log(`🔍 नयाँ उजुरी विश्लेषण गर्दै: "${complaint}"`);
 
-        // प्रम्प्टका लागि पृष्ठभूमि सन्दर्भ तयार गर्ने
+        // प्रम्प्टका लागि पृष्ठभूमि सन्दर्भ तयार गर्ने (दुवै source बाट)
         const relevantContext = buildRelevantLawContext(complaint, 6);
+        const catalogContext = buildCatalogLawContext(complaint, 10);
         const dbSuggestedForPrompt = buildSuggestedLawsFromDatabase(complaint, 4);
 
         // JSON responseType सहितको मोडेल कन्फिगर गर्ने
@@ -328,8 +408,11 @@ app.post('/api/analyze-complaint', async (req, res) => {
         [नागरिकको उजुरी]:
         "${complaint}"
 
-        [नेपालका सम्बन्धित कानूनहरू (सन्दर्भ)]:
+        [नेपालका सम्बन्धित कानूनहरू (laws_database.json बाट विस्तृत प्रावधानहरू)]:
         ${relevantContext}
+
+        [नेपालका सम्बन्धित ऐनहरू (nepal-laws-catalog.js बाट ऐन सूची)]:
+        ${catalogContext}
 
         [laws_database.json बाट पहिचान गरिएका प्रावधानहरू]:
         ${JSON.stringify(dbSuggestedForPrompt, null, 2)}

@@ -97,7 +97,7 @@ function showHotlineComplaintsView(initialFilters = {}) {
       <div class="card-header"><h5 class="mb-0">हटलाइनबाट प्राप्त उजुरी सूची</h5></div>
       <div class="card-body p-0">
         <div class="table-responsive">
-          <table class="table">
+          <table class="table table-fit">
             <thead><tr><th>क्र.सं.</th><th>मिति</th><th>उजुरकर्ता</th><th>विपक्षी</th><th>उजुरीको विवरण</th><th>सम्बन्धित शाखा</th><th>शाखामा पठाएको मिति</th><th>स्थिति</th><th>कार्य</th></tr></thead>
             <tbody>
               ${hotlineList.map((complaint, index) => `
@@ -4154,7 +4154,7 @@ async function saveNewComplaint() {
   console.log('📦 Complaint data prepared:', Object.keys(complaintData).join(', '));
 
   // ========== 4. SAVE TO GOOGLE SHEETS ==========
-  const result = await postToGoogleSheets('saveComplaint', complaintData);
+  const result = await postToGoogleSheets('saveComplaint', { ...complaintData, _t: Date.now() });
 
   console.log('📨 Save result:', result);
 

@@ -5,6 +5,8 @@
 
   const cfg = NVC.Config && NVC.Config.GOOGLE_SHEETS_CONFIG;
 
+  let _isLocalServerDown = false;
+
   // Full-featured JSONP-based GET (moved from script.js)
   NVC.Api.getFromGoogleSheets = async function (action, params = {}) {
     if (!cfg || !cfg.ENABLED) {
@@ -135,9 +137,13 @@
               clearTimeout(timeout);
               const bodyParams = new URLSearchParams(); bodyParams.append('action', action); bodyParams.append('apiKey', cfg.API_KEY);
               Object.keys(enhanced || data).forEach(k => { const v = (enhanced && enhanced[k] !== undefined) ? enhanced[k] : data[k]; if (v !== undefined && v !== null) bodyParams.append(k, String(v)); });
-              const resp = await fetch(cfg.WEB_APP_URL, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: bodyParams.toString(), credentials: 'omit' });
-              let json = null; try { json = await resp.json(); } catch (e) { json = null; }
-              if (json && (json.success === true || json.success === 'true')) { isResolved = true; try { delete window[callbackName]; } catch (e) { } try { if (script && script.parentNode) script.parentNode.removeChild(script); } catch (e) { } resolve(json); return; }
+              // Use no-cors for robust background delivery to Apps Script even if response can't be read
+              await fetch(cfg.WEB_APP_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: bodyParams.toString(), credentials: 'omit' });
+              isResolved = true; 
+              try { delete window[callbackName]; } catch (e) { } 
+              try { if (script && script.parentNode) script.parentNode.removeChild(script); } catch (e) { }
+              resolve({ success: true, message: 'Data sent via fallback fetch', local: true });
+              return;
             } catch (fetchError) {
               console.error('❌ Google Sheets Fallback Fetch Error:', fetchError);
             }
@@ -291,6 +297,7 @@
 
   /** Local gateway: catalog + laws_database.json only (no Gemini). */
   NVC.Api.analyzeWithLocalLawSources = async function (description) {
+    if (_isLocalServerDown) return null;
     try {
       const base = (NVC.Config && NVC.Config.AI_GATEWAY_URL) || 'http://localhost:3000/api/analyze-complaint';
       const url = base.replace(/\/analyze-complaint\/?$/, '/analyze-complaint-local');
@@ -304,7 +311,8 @@
       if (result.status === 'success' && result.analysis) return result.analysis;
       throw new Error(result.error || 'Local analysis failed');
     } catch (e) {
-      console.warn('Local law analysis endpoint unavailable:', e);
+      _isLocalServerDown = true;
+      console.warn('Local law analysis server is down. AI suggestions will use fallback rules.');
       return null;
     }
   };

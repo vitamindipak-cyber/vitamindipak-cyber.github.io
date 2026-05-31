@@ -654,6 +654,16 @@
             font-size: 0.85rem;
         }
 
+        .table-fit {
+            table-layout: auto;
+        }
+
+        .table-fit th,
+        .table-fit td {
+            white-space: normal;
+            word-break: break-word;
+        }
+
         .table th {
             background: var(--gray-50);
             padding: 0.6rem 0.8rem;
@@ -662,6 +672,10 @@
             color: var(--gray-700);
             border-bottom: 1px solid var(--gray-200);
             white-space: nowrap;
+        }
+
+        .table.table-fit th {
+            white-space: normal;
         }
 
         .table td {
