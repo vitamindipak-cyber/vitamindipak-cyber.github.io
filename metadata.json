@@ -1,0 +1,6 @@
+{
+  "name": "Jay Nepal Traders - Surgical & Medical Supplies",
+  "description": "जय नेपाल ट्रेडर्स - नेपालभरका अस्पताल, क्लिनिक र ल्याबहरूका लागि उच्च गुणस्तरीय सर्जिकल र मेडिकल उपकरण आपूर्तिकर्ता।",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

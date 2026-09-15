@@ -1,0 +1,10 @@
+{
+  "name": "jaynepal-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix ./jaynepal run dev",
+    "build": "npm --prefix ./jaynepal run build",
+    "preview": "npm --prefix ./jaynepal run preview",
+    "lint": "npm --prefix ./jaynepal run lint"
+  }
+}
